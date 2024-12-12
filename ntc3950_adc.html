@@ -1,0 +1,42 @@
+<textarea id ="out"></textarea>
+<script>
+
+out.value += "region=";
+
+const step = 0.01;
+
+var low_bound;
+
+var temp = -273.15;
+
+var adc_tab = Array();
+
+const resistance = 100;
+const reference = 10;
+const adcbit = 1024;
+
+while (true) {
+  low_bound = temp;
+  var r = resistance*Math.exp(3950/(temp+273.15)-3950/(25+273.15));
+  var adc = Math.round(adcbit*reference/(r+reference));
+
+  var next_adc;
+  while (true) {
+    temp += step;
+	r = resistance*Math.exp(3950/(temp+273.15)-3950/(25+273.15));
+	next_adc = Math.round(adcbit*reference/(r+reference));
+
+    if (next_adc !== adc) break;
+  }
+
+  if (adc >= 0)
+    adc_tab[adc] = Math.round((low_bound + temp) * 5);
+
+  console.log("ADC=", adc, "Tmax=", temp, "Tmin=", low_bound);
+  if (next_adc >= adcbit) break;
+}
+
+out.value +="\ncode const int16_t ADC[] = {"+adc_tab+"}";
+
+
+</script>

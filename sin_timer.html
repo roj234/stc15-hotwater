@@ -1,0 +1,39 @@
+<textarea id ="out"></textarea>
+<script>
+
+var region = 2e6;
+out.value += "region="+region;
+
+var out_table = "";
+
+const step = 1e-6;
+const uss = 255;//65535;
+var max_error = 0;
+var error = 0;
+
+for (var i = 0; i < 256; i++) {
+  var time = getRegion(region * (i/255));
+  var us = (uss-Math.round(time/Math.PI*uss));
+  var now_error = (((uss-us)/uss*Math.PI)-time);
+  error += now_error;
+  if (max_error < Math.abs(now_error)) max_error = Math.abs(now_error);
+  out_table += us+",";
+}
+
+out.value += "\n平均误差"+error/256+" 最大误差"+max_error;
+out.value +="\ncode const uint16_t SIN_TIMER[] = {"+out_table+"}";
+
+function getRegion(region1) {
+  let start = 0;
+  const end = Math.PI;
+  let region = 0;
+  while(start < end) {
+    start += step;
+    region += Math.sin(start);
+    if (region > region1) return start;
+  }
+
+  return end;
+}
+
+</script>
