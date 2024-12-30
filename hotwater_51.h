@@ -1,7 +1,24 @@
 #include <stc15xx.h>
 
+// HotWater_51 v1.1 by Roj234 2024-2025
+
 #ifndef _HOTWATER_51_H_
 #define _HOTWATER_51_H_
+
+// 宏定义 开始
+// 是否启用保温开水壶子系统
+#define WATER_TANK_EXIST
+// 漏水检测ADC值超过多少时报漏水错误并且停止放水 (电极通常放在集水盘上)
+#define WATER_LEAK_LIMIT (0)
+// 注意，这里是我的板子的参数，你使用时务必改成0然后校准
+#define INTEMP_CAL (-20)
+#define OUTTEMP_CAL (0)
+#define ROOMTEMP_CAL (0)
+#define TANKTEMP_CAL (1)
+
+// 调试
+#define PID_DEBUG
+// 宏定义 结束
 
 #define true 1
 #define false 0
@@ -32,13 +49,13 @@ sbit I_WATER_FLOW = P2^5;
 
 //原水TDS;
 sbit TDS1_IN = P1^4;
-sbit TDS1_U = P2^7;
-sbit TDS1_L = P0^2;
+sbit TDS1_A = P2^7;
+sbit TDS1_B = P0^2;
 
 //净水TDS;
 sbit TDS2_IN = P1^2;
-sbit TDS2_U = P0^0;
-sbit TDS2_L = P2^4;
+sbit TDS2_A = P0^0;
+sbit TDS2_B = P2^4;
 
 //内部输出接口;
 sbit O_UV_LIGHT = P2^2;
@@ -50,5 +67,30 @@ sbit O_HEAT_PWR = P3^6;
 sbit OEXT_3 = P3^3;
 sbit OEXT_4 = P2^0;
 sbit OEXT_5 = P3^7;
+
+#define CleanTDS  0
+#define WaterLeak 1
+#define WaterTDS  2
+#define OutTemp   3
+#define InTemp    4
+#define ACVolt    5
+#define VRef      6
+uint16_t AdcVal[7];
+
+// v1.1
+#ifdef WATER_TANK_EXIST
+	// 两个都是继电器（固态或线圈），所以不需要用OEXT_3
+	#define O_MAJOR_HEATER OEXT_5
+	#define O_MINOR_HEATER OEXT_4
+	// 散热风扇 懒得搞PWM了
+	#define O_FAN O_UV_LIGHT
+	// TDS1
+	#define RoomTemp  2
+	// TDS2
+	#define TankTemp  0
+
+	#undef CleanTDS
+	#undef WaterTDS
+#endif
 
 #endif
