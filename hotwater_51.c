@@ -107,7 +107,8 @@ void UART_Handler() interrupt 4 {
 				uart_state = 1;
 			}
 		break;
-		case 1, 2: 
+		case 1:
+		case 2: 
 			uart_id = SBUF;
 			uart_state += 2;
 		break;

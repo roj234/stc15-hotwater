@@ -2,7 +2,7 @@
 // ±1度
 #define WATER_TANK_ONOFF 10
 // 多少秒内温度不再升高判断为水开
-#define WATER_TANK_NODECR 45
+#define WATER_TANK_NODECR 60
 
 struct WaterTankState {
 	uint8_t timer, second;
@@ -17,7 +17,7 @@ struct WaterTankState {
 	MinorTankHeater = 1; \
 	TankState = 1; } \
 	else { \
-	TankState = 3; } }
+	TankState = 4; } }
 
 void Tank_Update() {
 	int16_t tmp = Temperature[3];
@@ -40,7 +40,7 @@ void Tank_Update() {
 			MinorTankHeater = 0;
 			//干烧保护 70度以下水温不上升判断没加水
 			if (tmp < 700) {
-				addError(0x07);
+				addError(0x05);
 				MajorTankHeater = 0;
 				TankState = 0;
 				return;
