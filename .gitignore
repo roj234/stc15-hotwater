@@ -1,3 +1,5 @@
 *.uvgui.*
+data/*.pdf
+.idea/*
 Objects/*
 Listings/*

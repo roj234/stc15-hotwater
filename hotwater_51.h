@@ -5,24 +5,28 @@
 #ifndef _HOTWATER_51_H_
 #define _HOTWATER_51_H_
 
+#define true 1
+#define false 0
+
 // 宏定义 开始
+
 // 是否启用保温开水壶子系统
-#define WATER_TANK_EXIST
+#define WATER_TANK_EXIST true
 // 漏水检测ADC值超过多少时报漏水错误并且停止放水 (电极通常放在集水盘上)
-#define WATER_LEAK_LIMIT (0)
+#define WATER_LEAK_LIMIT false
+// 是否采用定点运算tick_heater_fp
+#define USE_FIXED_POINT_ALG true
+// 调试
+#define DEBUG true
+
+// NTC校准
 // 注意，这里是我的板子的参数，你使用时务必改成0然后校准
 #define INTEMP_CAL (-20)
 #define OUTTEMP_CAL (0)
 #define ROOMTEMP_CAL (0)
 #define TANKTEMP_CAL (1)
 
-// 调试
-#define PID_DEBUG
 // 宏定义 结束
-
-#define true 1
-#define false 0
-#define null 0
 
 typedef unsigned char uint8_t;
 typedef unsigned int uint16_t;
@@ -78,7 +82,7 @@ sbit OEXT_5 = P3^7;
 uint16_t AdcVal[7];
 
 // v1.1
-#ifdef WATER_TANK_EXIST
+#if WATER_TANK_EXIST
 	// 两个都是继电器（固态或线圈），所以不需要用OEXT_3
 	#define O_MAJOR_HEATER OEXT_5
 	#define O_MINOR_HEATER OEXT_4

@@ -1,8 +1,8 @@
 
-// ±1度
-#define WATER_TANK_ONOFF 10
+// ±0.5度
+#define WATER_TANK_ONOFF 5
 // 多少秒内温度不再升高判断为水开
-#define WATER_TANK_NODECR 60
+#define WATER_TANK_NODECR 30
 
 struct WaterTankState {
 	uint8_t timer, second;
@@ -20,28 +20,31 @@ struct WaterTankState {
 	TankState = 4; } }
 
 void Tank_Update() {
-	int16_t tmp = Temperature[3];
+	int16_t tmp;
+	uint16_t adc;
 
 	// 每秒更新一次
 	if (++wts.timer < 20) return;
 	wts.timer = 0;
 
+	tmp = Temperature[3];
 	switch (TankState) {
-		// 1 加热 (主副加热器打开)
+		// 1 加热
 		case 1:
-			if (tmp > wts.maxTemp) {
-				wts.maxTemp = tmp;
+			adc = AdcVal[TankTemp];
+			if (adc > wts.maxTemp || adc < wts.maxTemp - 1) {
+				wts.maxTemp = adc;
 				wts.second = 0;
 			}
 
 			// 水的沸点不一定是100度，所以检测一段时间内温度没有升高
 			if (++wts.second < WATER_TANK_NODECR) break;
 
-			MinorTankHeater = 0;
+			MajorTankHeater = 0;
 			//干烧保护 70度以下水温不上升判断没加水
 			if (tmp < 700) {
 				addError(0x05);
-				MajorTankHeater = 0;
+				MinorTankHeater = 0;
 				TankState = 0;
 				return;
 			}
@@ -49,24 +52,24 @@ void Tank_Update() {
 			TankState = 2;
 			wts.second = 0;
 		break;
-		// 2 除氯 (dT=0后，副加热器关闭)
+		// 2 除氯
 		case 2:
-			// 沸腾3分钟除氯
-			if (++wts.second < 180) break;
+			// 根据上面的算法实测，两分钟够了，而且关闭主加热器也够
+			if (++wts.second < 120) break;
 
-			MajorTankHeater = 0;
+			MinorTankHeater = 0;
 			TankState = 3;
-		// 3 冷却 (3分钟后，副加热器关闭)
+		// 3 冷却
 		case 3:
 			O_FAN = WindCool;
 			if (tmp-TankTempSet > WATER_TANK_ONOFF) break;
 			// 关闭风冷，管他开没开
 			O_FAN = 0;
 			TankState = 4;
-		// 4 保温 (±1℃的开关控制)
+		// 4 保温
 		case 4:
 			tmp -= TankTempSet;
-			if (tmp > WATER_TANK_ONOFF) MinorTankHeater = 0;
+			if (tmp > 0) MinorTankHeater = 0;
 			else if (tmp < -WATER_TANK_ONOFF) MinorTankHeater = 1;
 	}
 }

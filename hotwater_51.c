@@ -23,7 +23,7 @@ void AdcUpdate(uint8_t);
 uint16_t GetAcVoltage();
 uint16_t AdcVal[];
 
-#ifdef WATER_TANK_EXIST
+#if WATER_TANK_EXIST
 int16_t Temperature[4];
 #else
 int16_t Temperature[2];
@@ -36,9 +36,7 @@ uint8_t PwmTimer, PwmPump, PwmHeat;
 
 uint8_t ErrMsg;
 void addError(uint8_t error) {
-	uint8_t hasError = ErrMsg&0xC0;
-	if (!hasError && !((ErrMsg - error)&0x3F))
-		ErrMsg = error;
+	if (!(ErrMsg&0xC0)) ErrMsg = error;
 }
 
 //测试得出的水流初始参考值
@@ -59,11 +57,15 @@ bit HotWater, EnableHotWater;
 uint16_t VoltTimer, VoltHz;
 
 // 注：不是PID
+#if USE_FIXED_POINT_ALG
+#include "tick_heater_fp.c"
+#else
 #include "tick_heater.c"
-#define tickHeater() PwmHeat = Heater_Update(OutTempSet - (int16_t)AdcVal[OutTemp]);
+#endif
+#define tickHeater() PwmHeat = Heater_Update(OutTempSet - Temperature[1]);
 
 // v1.1
-#ifdef WATER_TANK_EXIST
+#if WATER_TANK_EXIST
 	//纯净水：Packet_Water_Boiled 直接进入状态3
 	//自来水：/
 
@@ -108,7 +110,7 @@ void UART_Handler() interrupt 4 {
 			}
 		break;
 		case 1:
-		case 2: 
+		case 2:
 			uart_id = SBUF;
 			uart_state += 2;
 		break;
@@ -150,7 +152,7 @@ void ACZero_Handler() interrupt 0 {
 
 	O_HEAT_PWR = 1;
 	O_HEAT_ON = HotWater;
-#ifdef WATER_TANK_EXIST
+#if WATER_TANK_EXIST
 	O_MAJOR_HEATER = MajorTankHeater;
 	O_MINOR_HEATER = MinorTankHeater;
 #endif
@@ -198,7 +200,7 @@ void Timer0_Handler() interrupt 1 {
 		EA = 0;
 		AdcUpdateSum(InTemp);
 		AdcUpdateSum(OutTemp);
-#ifdef WATER_TANK_EXIST
+#if WATER_TANK_EXIST
 		AdcUpdateSum(RoomTemp);
 		AdcUpdateSum(TankTemp);
 #endif
@@ -236,14 +238,12 @@ void Timer0_Handler() interrupt 1 {
 			Temperature[0] = AdcInToTemp(AdcVal[InTemp]+INTEMP_CAL);
 			Temperature[1] = AdcOutToTemp(AdcVal[OutTemp]+OUTTEMP_CAL);
 
-			if (OutTempSet && AdcVal[InTemp] >= 500) {
-				addError(0x2);
-				OutTempSet = 0;
-			}
+			// 隔膜泵高温性能下降，而且其它零件也不一定能耐受这个温度，特别是晶闸管的散热
+			if (PwmPump && (Temperature[0] >= (OutTempSet ? 500 : 800))) addError(0x2);
 
 			if (HotWater) tickHeater();
 
-#ifdef WATER_TANK_EXIST
+#if WATER_TANK_EXIST
 			AdcVal[RoomTemp] /= WATERFLOW_DIV;
 			AdcVal[TankTemp] /= WATERFLOW_DIV;
 
@@ -269,7 +269,7 @@ void main() {
 
 	//首先关闭输出
 // v1.1
-#ifdef WATER_TANK_EXIST
+#if WATER_TANK_EXIST
 	//原水TDS; 当前用途 室温
 	//净水TDS2 当前用途 水箱温度
 	//TDS2_B提供ADC100%的参考电压
@@ -314,7 +314,7 @@ void main() {
 	// POWER SPEED1 SPEED0
 	ADC_CONTR = ADC_BASE;
 	CLK_DIV |= 32;
-	
+
 	delay1ms();
 
 	ADC_CONTR = ADC_BASE | ADC_START;
@@ -372,7 +372,7 @@ void main() {
 					tmp16 = AdcVal[ACVolt];
 					UART_SendByte(tmp16>>8);
 					UART_SendByte(tmp16);
-				
+
 					UART_SendByte(VoltHz>>8);
 					UART_SendByte(VoltHz);
 				break;
@@ -399,7 +399,7 @@ void main() {
 					UART_SendByte(WaterVol>>8);
 					UART_SendByte(WaterVol);
 				break;
-#ifdef WATER_TANK_EXIST
+#if WATER_TANK_EXIST
 				case 5:
 					UART_SendByte(0x15);
 
@@ -417,13 +417,17 @@ void main() {
 					UART_SendByte(tmp16);
 				break;
 #endif
-#ifdef PID_DEBUG
+#if DEBUG
 				case 6:
 					UART_SendByte(0x13);
+#if USE_FIXED_POINT_ALG
+					tmp16 = fz.out;
+#else
 					tmp16 = fz.out * 100;
+#endif
 					UART_SendByte(tmp16>>8);
 					UART_SendByte(tmp16);
-				
+
 					UART_SendByte(PwmPump);
 					UART_SendByte(PwmHeat);
 				break;
@@ -436,7 +440,7 @@ void main() {
 				case 1: OutTempSet = --uart_val > 118 ? 0 : 360+(uart_val*5); break;
 				case 2:
 					uart_val -= 0xA0;
-#ifdef WATER_TANK_EXIST
+#if WATER_TANK_EXIST
 					if (!Tank_Can_Drain(TankState)) addError(0x2);
 					else
 #endif
@@ -447,7 +451,7 @@ void main() {
 				case 3: WaterVol = 0; WaterVolLimit = uart_val; break;
 				case 4: WaterVolLimit |= (uint16_t)uart_val << 8; break;
 
-#ifdef WATER_TANK_EXIST
+#if WATER_TANK_EXIST
 				case 5: Tank_Init(uart_val == 0xBB); break;
 				case 6: TankTempSet = --uart_val > 88 ? 0 : 360+(uart_val*5); break;
 				case 7: WindCool = uart_val; break;
@@ -487,6 +491,7 @@ void main() {
 			}
 		}
 
+		// 延迟到有水流信号了再启动加热
 		if (EnableHotWater && WaterFlow) {
 			EnableHotWater = 0;
 
