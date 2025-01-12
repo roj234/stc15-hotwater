@@ -1,8 +1,5 @@
 
-// ±0.5度
-#define WATER_TANK_ONOFF 5
-// 多少秒内温度不再升高判断为水开
-#define WATER_TANK_NODECR 30
+#define max(a, b) ((a) > (b) ? (a) : (b))
 
 struct WaterTankState {
 	uint8_t timer, second;
@@ -12,12 +9,11 @@ struct WaterTankState {
 #define Tank_Init(boil) {\
 	wts.maxTemp = 0; \
 	wts.timer = 0; \
-	if (boil) { \
-	MajorTankHeater = 1; \
-	MinorTankHeater = 1; \
-	TankState = 1; } \
+	if (MajorTankHeater = (boil)) { \
+		MinorTankHeater = 1; \
+		TankState = 1; } \
 	else { \
-	TankState = 4; } }
+		TankState = 4; } }
 
 void Tank_Update() {
 	int16_t tmp;
@@ -41,6 +37,7 @@ void Tank_Update() {
 			if (++wts.second < WATER_TANK_NODECR) break;
 
 			MajorTankHeater = 0;
+#if USE_NOCL
 			//干烧保护 70度以下水温不上升判断没加水
 			if (tmp < 700) {
 				addError(0x05);
@@ -58,11 +55,20 @@ void Tank_Update() {
 			if (++wts.second < 120) break;
 
 			MinorTankHeater = 0;
+#else
+			//干烧保护
+			MinorTankHeater = 0;
+			if (tmp < 700) {
+				addError(0x05);
+				TankState = 0;
+				return;
+			}
+#endif
 			TankState = 3;
 		// 3 冷却
 		case 3:
 			O_FAN = WindCool;
-			if (tmp-TankTempSet > WATER_TANK_ONOFF) break;
+			if (tmp > max(TankTempSet, 500)+WATER_TANK_ONOFF) break;
 			// 关闭风冷，管他开没开
 			O_FAN = 0;
 			TankState = 4;

@@ -5,8 +5,6 @@
 
 code const float FUZZY_I[7] = {-0.75, -0.35, -0.09, 0.01, 0.1, 0.5, 1};
 code const int8_t FUZZY_E[9] = {-80, -30, -15, -5, 0, 5, 15, 30, 80};
-//不同水流速度下的功率最大值
-code const uint8_t HOT_MAX_PWR[] = {0, 144, 254};
 
 struct HeaterState {
 	uint8_t timer, cold_timer;

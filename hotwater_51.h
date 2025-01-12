@@ -12,12 +12,21 @@
 
 // 是否启用保温开水壶子系统
 #define WATER_TANK_EXIST true
+#define USE_NOCL false
+// ±0.5度
+#define WATER_TANK_ONOFF 5
+// 多少秒内温度不升高判断为水开
+#define WATER_TANK_NODECR 60
+
 // 漏水检测ADC值超过多少时报漏水错误并且停止放水 (电极通常放在集水盘上)
 #define WATER_LEAK_LIMIT false
+
 // 是否采用定点运算tick_heater_fp
 #define USE_FIXED_POINT_ALG true
+
 // 调试
 #define DEBUG true
+
 
 // NTC校准
 // 注意，这里是我的板子的参数，你使用时务必改成0然后校准

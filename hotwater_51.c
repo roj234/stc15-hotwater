@@ -40,7 +40,7 @@ void addError(uint8_t error) {
 }
 
 //测试得出的水流初始参考值
-code const uint8_t PUMP_VAL[] = {0, 42, 59, 80, 116, 175, 255};
+code const uint8_t PUMP_VAL[] = {0, 42, 48, 72, 108, 160, 255, 255};
 //水流设定
 uint8_t PumpSet;
 void setWater(uint8_t waterFlow);
@@ -56,13 +56,20 @@ bit HotWater, EnableHotWater;
 //电压和频率
 uint16_t VoltTimer, VoltHz;
 
-// 注：不是PID
+//不同水流速度下的功率最大值
+code const uint8_t HOT_MAX_PWR[] = {0, 144, 254};
+
 #if USE_FIXED_POINT_ALG
 #include "tick_heater_fp.c"
 #else
 #include "tick_heater.c"
 #endif
 #define tickHeater() PwmHeat = Heater_Update(OutTempSet - Temperature[1]);
+
+// v2.0
+code const uint8_t PacketSizeById[] = {0, 5, 0, 0, 1, 3};
+bit packetReceived, sendStatusReport;
+#include "serial.c"
 
 // v1.1
 #if WATER_TANK_EXIST
@@ -87,39 +94,6 @@ uint16_t VoltTimer, VoltHz;
 	#include "tick_water_tank.c"
 	#define tickTank Tank_Update
 #endif
-
-void UART_SendByte(uint8_t dat) {
-	EA = 0;
-	ACC = dat;
-	TB8 = P;
-	SBUF = dat;
-	while(!TI);
-	TI = 0;
-	EA = 1;
-}
-
-uint8_t uart_state, uart_id, uart_val;
-void UART_Handler() interrupt 4 {
-	RI = 0;
-	switch (uart_state) {
-		case 0:
-			if (SBUF == 0xAC) {
-				uart_state = 2;
-			} else if (SBUF == 0x56) {
-				uart_state = 1;
-			}
-		break;
-		case 1:
-		case 2:
-			uart_id = SBUF;
-			uart_state += 2;
-		break;
-		case 3:
-			uart_val = SBUF;
-			uart_state = 5;
-		break;
-	}
-}
 
 void AdcUpdate(uint8_t id) {
 	EA = 0;
@@ -216,7 +190,14 @@ void Timer0_Handler() interrupt 1 {
 			if (WaterFlow < PumpSet) {
 				if (PwmPump < 255) PwmPump++;
 
-				if (++NoWaterTimer == 40) addError(0x01);
+				if (++NoWaterTimer == 40) {
+					addError(0x01);
+#if WATER_TANK_EXIST
+					MajorTankHeater = 0;
+					MinorTankHeater = 0;
+					TankState = 0;
+#endif
+				}
 			} else {
 				if (WaterFlow > PumpSet && PwmPump > 40) PwmPump--;
 
@@ -259,13 +240,17 @@ void Timer0_Handler() interrupt 1 {
 #endif
 
 			FlagAdcSumReset = 1;
+			//sendStatusReport = true;
 		}
 	}
 }
 
 void main() {
-	uint8_t tmp;
+	uint8_t tmp, tmp2;
 	uint16_t tmp16;
+
+	//硬件启动
+	//WDT_CONTR = 0x24; // 启动看门狗 32分频 溢出时间大约为0.5s
 
 	//首先关闭输出
 // v1.1
@@ -324,160 +309,197 @@ void main() {
 	AdcVal[VRef] = (((uint16_t)ADC_RES << 8) | ADC_RESL);
 	P1ASF = 252;
 
-	//初始化计时器
-	AUXR = 0x15 | 128; // 关闭12分频，以及串口相关设置
+	// 计时器@22.1184Mhz
+	// T0_1T = 1; // 0x80 关闭T0的12分频
+	// T1_1T = 0; // 0x40 开启T1的12分频
+	AUXR = 0x95;  // 0x15 串口相关设置
 
-	//T0 25600Hz
+	//T0 25600Hz / 1T
 	TL0 = 0xA0;
 	TH0 = 0xFC;
-	TF0 = 0; // 清除标志位
-	ET0 = 1; // 允许中断
-	TR0 = 1; // 开启T0
 
-	//初始化串口 T2 115200bps at 22.1184Mhz
+	//T1 125Hz / 12T
+	//TL1 = 0x66;
+	//TH1 = 0xC6;
+	//TMOD |= 0x10; // 关闭自动重载
+
+	//T2 串口 115200bps
 	SCON = 0xD0;
 	T2L = 0xD0;
 	T2H = 0xFF;
-	ES = 1;
 
-	//初始化过零检测
-	//INT0 上升沿+下降沿
-	IT0 = 0;
-	EX0 = 1;
+	// TF0 = 0;
+	// TF1 = 0; // 清除标志位
+	// TR0 = 1; // 开启T0
+	// TR1 = 0; // 不开启T1
+	// IT0 = 0; // 过零检测 INT0 上升沿+下降沿
+	TCON = 0x10;
 
-	//允许中断
-	EA = 1;
+	Serial_Send();
+	Serial_Write(0x01);
+	Serial_Flush();
+
+	// 中断控制: ET0 | ET1 | EX0 | ES | EA
+	IE = 0x9b;
 
 	while(1) {
-		if (uart_state == 4) {
-			// GET
-			switch (uart_id) {
-				case 2: //Get analog input
-					UART_SendByte(0x12);
-					tmp16 = Temperature[0];
-					UART_SendByte(tmp16>>8);
-					UART_SendByte(tmp16);
+		WDT_CONTR |= 0x10; // 喂狗
 
-					tmp16 = Temperature[1];
-					UART_SendByte(tmp16>>8);
-					UART_SendByte(tmp16);
+		if (packetReceived) {
+			switch(serialBuf[1]) {
+				case 0: // Status Request
+					sendStatusReport = true;
+				goto NoAck;
+				case 1: // Drain Water
+					// 0 to 95
+					OutTempSet = (serialBuf[2] << 8) | serialBuf[3];
+					if (OutTempSet > 950 || OutTempSet < 0) {
+						OutTempSet = 0;
+						uartError = true;
+						break;
+					}
 
-					tmp16 = OutTempSet;
-					UART_SendByte(tmp16>>8);
-					UART_SendByte(tmp16);
-
-					UART_SendByte(WaterFlow>>8);
-					UART_SendByte(WaterFlow);
-
-					tmp16 = AdcVal[ACVolt];
-					UART_SendByte(tmp16>>8);
-					UART_SendByte(tmp16);
-
-					UART_SendByte(VoltHz>>8);
-					UART_SendByte(VoltHz);
+					WaterVol = 0;
+					WaterVolLimit = (serialBuf[5] << 8) | serialBuf[6];
+					setWater(serialBuf[4]);
 				break;
-				case 0: //Get digital input
-					PrevDigitalInput = 0x80;
+				case 2: // Clear Error
+					if (ErrMsg & 0x40) {
+						// 软重置 (watchdog)
+						while (1);
+					} else {
+						ErrMsg = 0;
+					}
 				break;
-				case 1: //Get digital output
-					tmp16 = 0;
-					if (O_UV_LIGHT) tmp16 |= 1;
-					if (OEXT_3) tmp16 |= 2;
-					if (OEXT_4) tmp16 |= 4;
-					if (OEXT_5) tmp16 |= 8;
-
-					if (O_PUMP) tmp16 |= 16;
-					if (O_HEAT_ON) tmp16 |= 32;
-					UART_SendByte(0x11);
-					UART_SendByte(tmp16);
-				break;
-				case 3:
-					UART_SendByte(0x80 | ErrMsg);
-				break;
-				case 4:
-					UART_SendByte(0x14);
-					UART_SendByte(WaterVol>>8);
-					UART_SendByte(WaterVol);
-				break;
+				case 3: // Setting Request
+					Serial_Send();
+					Serial_Write(0x04);
+					Serial_Write(OutTempSet>>8);
+					Serial_Write(OutTempSet);
+					Serial_Write(WaterVol>>8);
+					Serial_Write(WaterVol);
 #if WATER_TANK_EXIST
-				case 5:
-					UART_SendByte(0x15);
-
-					UART_SendByte(TankState);
-
-					UART_SendByte(TankTempSet>>8);
-					UART_SendByte(TankTempSet);
-
-					tmp16 = Temperature[2];
-					UART_SendByte(tmp16>>8);
-					UART_SendByte(tmp16);
-
-					tmp16 = Temperature[3];
-					UART_SendByte(tmp16>>8);
-					UART_SendByte(tmp16);
+					Serial_Write(TankTempSet>>8);
+					Serial_Write(TankTempSet);
+					Serial_Write(WindCool);
+#endif
+					Serial_Flush();
+				goto NoAck2;
+#if WATER_TANK_EXIST
+				case 4: // Tank Init
+					Tank_Init(serialBuf[2]);
+				break;
+				case 5: // Tank Setting
+					WindCool = serialBuf[2];
+					TankTempSet = (serialBuf[3] << 8) | serialBuf[4];
+					if (TankTempSet > 800 || TankTempSet < 0) {
+						TankTempSet = 0;
+						uartError = true;
+					}
 				break;
 #endif
+			}
+
+			tmp = serialBuf[serialPtr];
+			tmp2 = serialBuf[1];
+			Serial_Send();
+			Serial_Write(0x01);
+			Serial_Write(tmp2);
+			Serial_Write(tmp);
+			Serial_Flush();
+			NoAck:
+			serialPtr = 0;
+
+			NoAck2:
+			packetReceived = false;
+			ES = true;
+		}
+
+		if (sendStatusReport && !serialPtr) {
+			ES = false;
+			if (!serialPtr) {
+				sendStatusReport = false;
+
+				Serial_Send();
+				Serial_Write(uartError ? 0x3 : 0x2);
+				Serial_Write(ErrMsg);
+
+				Serial_Write(PrevDigitalInput);
+
+				tmp16 = 0;
+				if (O_UV_LIGHT) tmp16 |= 1;
+				if (OEXT_3) tmp16 |= 2;
+				if (OEXT_4) tmp16 |= 4;
+				if (OEXT_5) tmp16 |= 8;
+
+				if (PwmPump) tmp16 |= 16;
+				if (O_HEAT_ON) tmp16 |= 32;
+				Serial_Write(tmp16);
+
+				tmp16 = Temperature[0];
+				Serial_Write(tmp16>>8);
+				Serial_Write(tmp16);
+
+				tmp16 = Temperature[1];
+				Serial_Write(tmp16>>8);
+				Serial_Write(tmp16);
+
+				Serial_Write(WaterVol>>8);
+				Serial_Write(WaterVol);
+
+				tmp16 = AdcVal[ACVolt];
+				Serial_Write(tmp16>>8);
+				Serial_Write(tmp16);
+
+				Serial_Write(VoltHz>>8);
+				Serial_Write(VoltHz);
+
+#if WATER_TANK_EXIST
+				Serial_Write(0x25);
+				Serial_Write(TankState);
+				tmp16 = Temperature[2];
+				Serial_Write(tmp16>>8);
+				Serial_Write(tmp16);
+				tmp16 = Temperature[3];
+				Serial_Write(tmp16>>8);
+				Serial_Write(tmp16);
+#endif
+
 #if DEBUG
-				case 6:
-					UART_SendByte(0x13);
+				Serial_Write(0x14);
 #if USE_FIXED_POINT_ALG
-					tmp16 = fz.out;
+				tmp16 = fz.out;
 #else
-					tmp16 = fz.out * 100;
+				tmp16 = fz.out * 100;
 #endif
-					UART_SendByte(tmp16>>8);
-					UART_SendByte(tmp16);
+				Serial_Write(tmp16>>8);
+				Serial_Write(tmp16);
 
-					UART_SendByte(PwmPump);
-					UART_SendByte(PwmHeat);
-				break;
+				Serial_Write(PwmPump);
+				Serial_Write(PwmHeat);
 #endif
+
+				Serial_Flush();
 			}
-			uart_state = 0;
-		} else if (uart_state == 5) {
-			// SET
-			switch (uart_id) {
-				case 1: OutTempSet = --uart_val > 118 ? 0 : 360+(uart_val*5); break;
-				case 2:
-					uart_val -= 0xA0;
-#if WATER_TANK_EXIST
-					if (!Tank_Can_Drain(TankState)) addError(0x2);
-					else
-#endif
-					setWater(uart_val > 6 ? 0 : uart_val);
-				break;
-				case 0: ErrMsg = 0; break;
 
-				case 3: WaterVol = 0; WaterVolLimit = uart_val; break;
-				case 4: WaterVolLimit |= (uint16_t)uart_val << 8; break;
-
-#if WATER_TANK_EXIST
-				case 5: Tank_Init(uart_val == 0xBB); break;
-				case 6: TankTempSet = --uart_val > 88 ? 0 : 360+(uart_val*5); break;
-				case 7: WindCool = uart_val; break;
-#endif
-			}
-			uart_state = 0;
+			uartError = false;
+			ES = true;
 		}
 
 		tmp = 0;
 		if (!I_WATER_LOW ) tmp |= 1;
 		if (!I_WATER_MED ) tmp |= 2;
 		if (!I_WATER_HIGH) tmp |= 4;
-
 		if (!I_WATER_LEVEL) tmp |= 8;
 		if (!I_DIRTY_WATER_LEVEL) tmp |= 16;
-
 		if (WaterVolLimit && WaterVol >= WaterVolLimit) {
 			tmp |= 32;
-			WaterVol = 0;
 			setWater(0);
 		}
 
 		if (PrevDigitalInput != tmp) {
 			PrevDigitalInput = tmp;
-			UART_SendByte(0x10);
-			UART_SendByte(tmp);
+			sendStatusReport = true;
 		}
 
 		if (ErrMsg) {
@@ -487,7 +509,7 @@ void main() {
 
 			if (!(ErrMsg&0x80)) {
 				ErrMsg |= 0x80;
-				UART_SendByte(ErrMsg);
+				sendStatusReport = true;
 			}
 		}
 

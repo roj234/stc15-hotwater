@@ -1,5 +1,5 @@
-#ifndef __STC15F2K60S2_H_
-#define __STC15F2K60S2_H_
+#ifndef __STC15_H__
+#define __STC15_H__
 
 /////////////////////////////////////////////////
 //注意: STC15W4K32S4系列的芯片,上电后所有与PWM相关的IO口均为
@@ -22,6 +22,7 @@ sbit F0         =   PSW^5;
 sbit RS1        =   PSW^4;
 sbit RS0        =   PSW^3;
 sbit OV         =   PSW^2;
+sbit F1         =   PSW^1;
 sbit P          =   PSW^0;
 sfr SP          =   0x81;   //0000,0111 堆栈指针
 sfr DPL         =   0x82;   //0000,0000 数据指针低字节

@@ -3,24 +3,27 @@
 #define FUZZY_ERROR_MAX 50
 #define BIG_CLIP        150
 
+// v1.2 先增加
+#define STABLE_INCREMENT 30
+// 50ms/t -> 7000ms
+#define STABLE_TIMEOUT 140
+
 code const int8_t FUZZY_I[7] = {-75, -35, -9, 1, 10, 50, 100};
 code const int8_t FUZZY_E[9] = {-80, -30, -15, -5, 0, 5, 15, 30, 80};
-//不同水流速度下的功率最大值
-code const uint8_t HOT_MAX_PWR[] = {0, 144, 254};
 
-#define TF(x) (100 * x)
-#define FF(x) (x / 100)
+#define TF(x) (100 * (x))
+#define FF(x) ((x) / 100)
 
 struct HeaterState {
-	uint8_t timer, cold_timer;
+	uint8_t timer, cold_timer, stable_timer;
 	uint8_t state, theta;
-	int8_t ec;
-	int16_t out;
+	int16_t ec, out;
 } fz;
 
 #define Heater_Init() \
 	fz.timer = 0; \
 	fz.cold_timer = 0; \
+	fz.stable_timer = 0; \
 	fz.state = 0; \
 	fz.ec = 0; \
 	if (AdcVal[OutTemp] > OutTempSet) { \
@@ -32,11 +35,15 @@ struct HeaterState {
 	}
 
 uint8_t Heater_Update(int16_t error) {
-	int16_t absError = error < 0 ? -error : error;
+	int16_t absError;
 	int16_t total, delta;
 	uint8_t i;
 	int16_t a, b, c;
 	uint8_t val, max;
+
+	if (fz.stable_timer != STABLE_TIMEOUT) error += STABLE_INCREMENT;
+
+	absError = error < 0 ? -error : error;
 
 	delta = 5 * (error - fz.ec);
 	fz.ec = error;
@@ -99,6 +106,8 @@ uint8_t Heater_Update(int16_t error) {
 			fz.state = 4;
 			if (fz.theta) fz.theta >>= 1;
 		}
+
+		if (fz.stable_timer != STABLE_TIMEOUT) { ++fz.stable_timer; }
 
 		val = FF(fz.out);
 	}
